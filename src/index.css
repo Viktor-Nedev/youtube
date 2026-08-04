@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces — a real elevation ladder, not one flat grey */
+  --color-ink-990: #060709;
+  --color-ink-950: #0a0b0f;
+  --color-ink-900: #0f1116;
+  --color-ink-850: #14171e;
+  --color-ink-800: #1a1e27;
+  --color-ink-700: #252a36;
+  --color-ink-600: #343a4a;
+  --color-ink-500: #4d5568;
+  --color-ink-400: #737d94;
+  --color-ink-300: #a3abbd;
+  --color-ink-200: #d2d7e2;
+  --color-ink-100: #eef0f5;
+
+  --color-accent: #ff4a32;
+  --color-accent-soft: #ff8f7d;
+  --color-accent-dim: #b32d1c;
+  --color-signal: #ffc846;
+  --color-good: #2fd07a;
+
+  --font-display: "Bricolage Grotesque Variable", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Inter Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code", monospace;
+
+  /* Display scale — deliberately wide gaps so hierarchy is unmistakable */
+  --text-display: 4.5rem;
+  --text-display--line-height: 0.94;
+  --text-display--letter-spacing: -0.035em;
+  --text-title: 2.25rem;
+  --text-title--line-height: 1.08;
+  --text-title--letter-spacing: -0.025em;
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1.2;
+  --text-label--letter-spacing: 0.14em;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-200);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Headings carry the display face — this is what stops the UI reading as default Tailwind */
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 100;
+}
+
+/* Every figure that sits in a column or gets compared aligns on the digit */
+.tabular,
+.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small-caps tracked label — the editorial anchor used above every section */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+html.lenis {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ink-950);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border-radius: 99px;
+  border: 2px solid var(--color-ink-950);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-600);
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-ink-800);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.05), transparent);
+  animation: shimmer 1.6s infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-up {
+  animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Film grain over the hero — kills the flat digital gradient look */
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.16;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Hairline rule used to separate editorial blocks */
+.rule {
+  height: 1px;
+  background: linear-gradient(90deg, var(--color-ink-700), transparent);
+}
