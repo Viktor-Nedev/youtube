@@ -27,10 +27,12 @@ gsap.registerPlugin(ScrollTrigger);
  * viewport size instead of being locked to a pre-rendered frame width.
  */
 
+// Served from public/ so the plates ship with the repo and survive a fresh
+// clone — data/ is gitignored and holds only per-run generated output.
 const SCENES = [
-  { src: "/files/hero/shot-wide.jpg", alt: "" },
-  { src: "/files/hero/shot-close.jpg", alt: "" },
-  { src: "/files/hero/shot-output.jpg", alt: "" }
+  { src: "/hero/shot-wide.jpg", alt: "" },
+  { src: "/hero/shot-close.jpg", alt: "" },
+  { src: "/hero/shot-output.jpg", alt: "" }
 ];
 
 const BEATS = [
