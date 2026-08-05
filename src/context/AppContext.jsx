@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { api } from "../lib/api.js";
 
 /**
@@ -13,21 +13,63 @@ import { api } from "../lib/api.js";
 
 const AppContext = createContext(null);
 
+const ACTIVE_PROJECT_KEY = "copilot.activeProjectId";
+
 export function AppProvider({ children }) {
+  // Plain setter, so callers can still use the functional-updater form.
   const [project, setProject] = useState(null);
   const [projects, setProjects] = useState([]);
   const [fingerprint, setFingerprint] = useState(null);
   const [health, setHealth] = useState(null);
+
+  // Guards the persistence effect below until the initial restore has run,
+  // otherwise the opening `project === null` would erase the saved id first.
+  const restored = useRef(false);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ ok: false }));
     api.activeChannel()
       .then((res) => res.fingerprint && setFingerprint(res.fingerprint))
       .catch(() => {});
+
     api.listProjects()
-      .then((res) => setProjects(res.projects ?? []))
-      .catch(() => {});
+      .then(async (res) => {
+        const list = res.projects ?? [];
+        setProjects(list);
+
+        let savedId = null;
+        try {
+          savedId = localStorage.getItem(ACTIVE_PROJECT_KEY);
+        } catch {
+          /* storage unavailable (private mode) */
+        }
+
+        // The list payload is a summary, so re-fetch the full project.
+        if (savedId && list.some((p) => p.id === savedId)) {
+          const full = await api.getProject(savedId).catch(() => null);
+          if (full?.project) setProject(full.project);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        restored.current = true;
+      });
   }, []);
+
+  /**
+   * Remembers which project is active across reloads. Without this a refresh
+   * drops every module back to its empty state even though the upload and its
+   * transcript are still on the server.
+   */
+  useEffect(() => {
+    if (!restored.current) return;
+    try {
+      if (project?.id) localStorage.setItem(ACTIVE_PROJECT_KEY, project.id);
+      else localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    } catch {
+      /* storage unavailable — in-memory state still works */
+    }
+  }, [project?.id]);
 
   const refreshProjects = useCallback(async () => {
     const res = await api.listProjects();

@@ -194,6 +194,9 @@ ${analysed.map((v) => `${v.id} :: ${v.title}`).join("\n")}`;
   const labelById = new Map(labelled.videos.map((v) => [v.id, v]));
   const analysedWithLabels = analysed.map((video) => ({
     ...video,
+    // Carried here as well as on `withRatio` because the underperformer prompt
+    // and payload below both read it off this array.
+    performanceRatio: medianViews ? Number((video.views / medianViews).toFixed(2)) : 1,
     features: labelById.get(video.id)?.features ?? [],
     topic: labelById.get(video.id)?.topic ?? "uncategorised"
   }));
