@@ -44,13 +44,25 @@ async function call(endpoint, params, cost = 1) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const reason = body?.error?.errors?.[0]?.reason;
-    const message = body?.error?.message || response.statusText;
+    // Google embeds anchor tags and <code> in error text; strip it so the UI
+    // shows a sentence rather than raw markup.
+    const message = String(body?.error?.message || response.statusText)
+      .replace(/<[^>]*>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
     if (reason === "quotaExceeded") {
       throw Object.assign(new Error("YouTube API daily quota exceeded. It resets at midnight Pacific time."), {
         status: 429
       });
     }
+    if (reason === "videoNotFound") {
+      throw Object.assign(new Error("That video doesn't exist, or it isn't public."), { status: 404 });
+    }
+    if (reason === "commentsDisabled") {
+      throw Object.assign(new Error("Comments are disabled on that video."), { status: 400 });
+    }
+
     throw Object.assign(new Error(`YouTube API (${endpoint}): ${message}`), { status: response.status });
   }
 
