@@ -11,12 +11,15 @@ import {
   Badge,
   ErrorNote,
   EmptyState,
-  RunningNote
+  RunningNote,
+  Spinner
 } from "../components/ui.jsx";
 
 export default function ThumbnailPage() {
   const { project, patchProject, fingerprint } = useApp();
   const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState(null);
+  const [preview, setPreview] = useState(null);
   const [rerendering, setRerendering] = useState(false);
   const [error, setError] = useState(null);
   const [text, setText] = useState("");
@@ -33,16 +36,29 @@ export default function ThumbnailPage() {
     }
   }, [thumbnail?.thumbnailUrl]);
 
+  /**
+   * Runs the two phases in sequence so the locally scored grid is on screen
+   * while the vision call is still in flight — the local scoring step is a real
+   * part of the pipeline and shouldn't be hidden inside one long spinner.
+   */
   const generate = async () => {
     setLoading(true);
     setError(null);
+    setPhase("frames");
+    setPreview(null);
     try {
-      const result = await api.generateThumbnail(project.id);
+      const scored = await api.thumbnailFrames(project.id);
+      setPreview(scored);
+      setPhase("judging");
+
+      const result = await api.thumbnailJudge(project.id);
       patchProject({ thumbnail: result.thumbnail });
+      setPreview(null);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setPhase(null);
     }
   };
 
@@ -89,8 +105,41 @@ export default function ThumbnailPage() {
         </Badge>
       ) : null}
 
-      {loading ? <RunningNote label="Extracting frames, scoring locally, then one Gemini vision call…" /> : null}
+      {loading ? (
+        <RunningNote
+          label={
+            phase === "frames"
+              ? "Extracting frames and scoring each one locally — sharpness, colour, exposure…"
+              : "Frames scored. Sending the finalists to Gemini vision for click-appeal judgement…"
+          }
+        />
+      ) : null}
       <ErrorNote error={error} onRetry={generate} />
+
+      {/* Phase 1 output: real local scores, on screen while the AI is still thinking. */}
+      {preview ? (
+        <section className="fade-up">
+          <SectionTitle hint={`${preview.framesSampled} frames sampled → ${preview.finalistCount} finalists in ${(preview.elapsedMs / 1000).toFixed(1)}s`}>
+            Locally scored finalists
+          </SectionTitle>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {preview.candidates.map((candidate) => (
+              <Card key={candidate.index} className="overflow-hidden">
+                <div className="relative">
+                  <img src={candidate.previewUrl} alt="" className="w-full" />
+                  <span className="absolute right-2 top-2 rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-xs text-white">
+                    {candidate.timeLabel}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2.5">
+                  <span className="tabular text-xs text-ink-400">local {candidate.localScore.toFixed(3)}</span>
+                  <Spinner className="h-3 w-3 text-ink-600" />
+                </div>
+              </Card>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {thumbnail ? (
         <div className="space-y-8 fade-up">

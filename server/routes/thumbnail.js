@@ -41,32 +41,67 @@ const VISION_SCHEMA = {
 };
 
 /**
- * POST /api/thumbnail/:projectId
- * Samples frames, pre-filters them locally, then spends exactly one Gemini
- * vision call ranking the finalists and choosing overlay text.
+ * Finalists are cached between the two-phase calls below.
+ *
+ * Deliberately in memory rather than on the project: they hold absolute frame
+ * paths that have no business reaching the browser, and they are cheap to
+ * rebuild if the process restarts mid-flow.
+ *
+ * @type {Map<string, {finalists: Array, framesSampled: number, elapsedMs: number}>}
  */
-router.post("/:projectId", async (req, res, next) => {
-  try {
-    const project = requireProject(req.params.projectId);
-    const dir = projectDir(project.id);
-    const started = Date.now();
+const finalistCache = new Map();
 
-    // Sample density scales with length so a 2-minute and a 40-minute video both
-    // yield a workable number of candidates.
-    const duration = project.media.durationSec || 60;
-    const everySec = Math.max(1, Math.round(duration / 60));
+/**
+ * Phase 1 — sample frames and score them locally. No AI, no cost.
+ * Split out so the candidate grid can appear after ~15s instead of the browser
+ * sitting on a blank spinner for the full ~70s round trip.
+ */
+async function buildCandidates(project) {
+  const dir = projectDir(project.id);
+  const started = Date.now();
 
-    const frames = await extractFrames(project.videoPath, path.join(dir, "frames"), { everySec });
-    if (!frames.length) {
-      throw Object.assign(new Error("Could not extract any frames from this video."), { status: 400 });
-    }
+  // Sample density scales with length so a 2-minute and a 40-minute video both
+  // yield a workable number of candidates.
+  const duration = project.media.durationSec || 60;
+  const everySec = Math.max(1, Math.round(duration / 60));
 
-    const finalists = await rankFrames(frames, { take: 8 });
+  const frames = await extractFrames(project.videoPath, path.join(dir, "frames"), { everySec });
+  if (!frames.length) {
+    throw Object.assign(new Error("Could not extract any frames from this video."), { status: 400 });
+  }
 
-    const fingerprint = await getActiveFingerprint();
-    const channelContext = fingerprintToPromptContext(fingerprint);
+  const finalists = await rankFrames(frames, { take: 8 });
 
-    const prompt = `You are choosing a YouTube thumbnail. ${finalists.length} candidate frames from one video follow, in order.
+  const previews = [];
+  for (const [index, frame] of finalists.entries()) {
+    const previewPath = path.join(dir, "previews", path.basename(frame.file));
+    await makePreview(frame.file, previewPath);
+    previews.push({
+      index: index + 1,
+      timeSec: frame.timeSec,
+      timeLabel: toTimestamp(frame.timeSec),
+      previewUrl: toPublicUrl(previewPath),
+      localScore: frame.score,
+      metrics: frame.metrics
+    });
+  }
+
+  const payload = { finalists, framesSampled: frames.length, elapsedMs: Date.now() - started };
+  finalistCache.set(project.id, payload);
+
+  return { ...payload, previews };
+}
+
+/** Phase 2 — one multimodal call ranks the finalists and writes the overlay. */
+async function judgeCandidates(project, cached) {
+  const dir = projectDir(project.id);
+  const started = Date.now();
+  const finalists = cached.finalists;
+
+  const fingerprint = await getActiveFingerprint();
+  const channelContext = fingerprintToPromptContext(fingerprint);
+
+  const prompt = `You are choosing a YouTube thumbnail. ${finalists.length} candidate frames from one video follow, in order.
 
 ${channelContext ? `${channelContext}\n\nMatch the overlay text and styling to this channel's established look.\n` : ""}
 VIDEO SUMMARY: ${project.transcript?.summary ?? "(not transcribed)"}
@@ -84,77 +119,117 @@ slides, captions, browser or app UI. Two competing sets of words in one thumbnai
 makes both unreadable, which matters especially for screen recordings and slides.
 Pick an accent colour with strong contrast against that region of that frame.`;
 
-    const imageParts = [];
-    for (const frame of finalists) imageParts.push(await imagePart(frame.file));
+  const imageParts = [];
+  for (const frame of finalists) imageParts.push(await imagePart(frame.file));
 
-    const vision = await generateJSON({
-      input: [{ type: "text", text: prompt }, ...imageParts],
-      schema: VISION_SCHEMA,
-      model: MODELS.flash,
-      label: "thumbnail:vision"
+  const vision = await generateJSON({
+    input: [{ type: "text", text: prompt }, ...imageParts],
+    schema: VISION_SCHEMA,
+    model: MODELS.flash,
+    label: "thumbnail:vision"
+  });
+
+  // Clamp: a hallucinated index would otherwise crash the render.
+  const winnerIndex = Math.min(Math.max(1, vision.winnerIndex), finalists.length) - 1;
+  const winner = finalists[winnerIndex];
+
+  // Re-grab the winning moment at full resolution — the ranked frames were
+  // downscaled to 1280px for cheap scoring.
+  const hiResPath = path.join(dir, "thumbs", `winner-${winner.timeSec}.jpg`);
+  await extractFrameAt(project.videoPath, winner.timeSec, hiResPath);
+
+  const finalPath = path.join(dir, "thumbs", "thumbnail.png");
+  await renderThumbnail({
+    frameFile: hiResPath,
+    text: vision.overlayText,
+    outputPath: finalPath,
+    position: vision.textPosition,
+    accent: vision.accentColor
+  });
+
+  // Also render a clean version so the creator can add their own text.
+  const cleanPath = path.join(dir, "thumbs", "thumbnail-clean.png");
+  await renderThumbnail({ frameFile: hiResPath, text: null, outputPath: cleanPath });
+
+  const scoreByIndex = new Map(vision.candidates.map((c) => [c.index, c]));
+  const candidates = [];
+
+  for (const [index, frame] of finalists.entries()) {
+    const previewPath = path.join(dir, "previews", path.basename(frame.file));
+    await makePreview(frame.file, previewPath);
+    const ai = scoreByIndex.get(index + 1);
+
+    candidates.push({
+      index: index + 1,
+      timeSec: frame.timeSec,
+      timeLabel: toTimestamp(frame.timeSec),
+      previewUrl: toPublicUrl(previewPath),
+      localScore: frame.score,
+      metrics: frame.metrics,
+      aiScore: ai?.score ?? null,
+      reasoning: ai?.reasoning ?? null,
+      hasFace: ai?.hasFace ?? null,
+      expression: ai?.expression ?? null,
+      isWinner: index === winnerIndex
     });
+  }
 
-    // Clamp: a hallucinated index would otherwise crash the render.
-    const winnerIndex = Math.min(Math.max(1, vision.winnerIndex), finalists.length) - 1;
-    const winner = finalists[winnerIndex];
+  const thumbnail = {
+    candidates,
+    framesSampled: cached.framesSampled,
+    finalistCount: finalists.length,
+    overlayText: vision.overlayText,
+    textPosition: vision.textPosition,
+    accentColor: vision.accentColor,
+    winnerReason: vision.winnerReason,
+    winnerTimeSec: winner.timeSec,
+    thumbnailUrl: toPublicUrl(finalPath),
+    cleanUrl: toPublicUrl(cleanPath),
+    usedFingerprint: Boolean(fingerprint),
+    // Total across both phases, so the reported time still reflects the real work.
+    elapsedMs: cached.elapsedMs + (Date.now() - started)
+  };
 
-    // Re-grab the winning moment at full resolution — the ranked frames were
-    // downscaled to 1280px for cheap scoring.
-    const hiResPath = path.join(dir, "thumbs", `winner-${winner.timeSec}.jpg`);
-    await extractFrameAt(project.videoPath, winner.timeSec, hiResPath);
+  updateProject(project.id, { thumbnail });
+  return thumbnail;
+}
 
-    const finalPath = path.join(dir, "thumbs", "thumbnail.png");
-    await renderThumbnail({
-      frameFile: hiResPath,
-      text: vision.overlayText,
-      outputPath: finalPath,
-      position: vision.textPosition,
-      accent: vision.accentColor
-    });
+/**
+ * POST /api/thumbnail/:projectId/frames — phase 1.
+ * Returns the locally scored candidate grid before any AI runs.
+ */
+router.post("/:projectId/frames", async (req, res, next) => {
+  try {
+    const project = requireProject(req.params.projectId);
+    const { previews, framesSampled, elapsedMs } = await buildCandidates(project);
+    res.json({ candidates: previews, framesSampled, finalistCount: previews.length, elapsedMs });
+  } catch (error) {
+    next(error);
+  }
+});
 
-    // Also render a clean version so the creator can add their own text.
-    const cleanPath = path.join(dir, "thumbs", "thumbnail-clean.png");
-    await renderThumbnail({ frameFile: hiResPath, text: null, outputPath: cleanPath });
+/**
+ * POST /api/thumbnail/:projectId/judge — phase 2.
+ * Re-runs phase 1 transparently if the cache is cold (e.g. server restarted
+ * between the two calls), so the endpoint is safe to call on its own.
+ */
+router.post("/:projectId/judge", async (req, res, next) => {
+  try {
+    const project = requireProject(req.params.projectId);
+    const cached = finalistCache.get(project.id) ?? (await buildCandidates(project));
+    const thumbnail = await judgeCandidates(project, cached);
+    res.json({ thumbnail });
+  } catch (error) {
+    next(error);
+  }
+});
 
-    const scoreByIndex = new Map(vision.candidates.map((c) => [c.index, c]));
-    const candidates = [];
-
-    for (const [index, frame] of finalists.entries()) {
-      const previewPath = path.join(dir, "previews", `${path.basename(frame.file)}`);
-      await makePreview(frame.file, previewPath);
-      const ai = scoreByIndex.get(index + 1);
-
-      candidates.push({
-        index: index + 1,
-        timeSec: frame.timeSec,
-        timeLabel: toTimestamp(frame.timeSec),
-        previewUrl: toPublicUrl(previewPath),
-        localScore: frame.score,
-        metrics: frame.metrics,
-        aiScore: ai?.score ?? null,
-        reasoning: ai?.reasoning ?? null,
-        hasFace: ai?.hasFace ?? null,
-        expression: ai?.expression ?? null,
-        isWinner: index === winnerIndex
-      });
-    }
-
-    const thumbnail = {
-      candidates,
-      framesSampled: frames.length,
-      finalistCount: finalists.length,
-      overlayText: vision.overlayText,
-      textPosition: vision.textPosition,
-      accentColor: vision.accentColor,
-      winnerReason: vision.winnerReason,
-      winnerTimeSec: winner.timeSec,
-      thumbnailUrl: toPublicUrl(finalPath),
-      cleanUrl: toPublicUrl(cleanPath),
-      usedFingerprint: Boolean(fingerprint),
-      elapsedMs: Date.now() - started
-    };
-
-    updateProject(project.id, { thumbnail });
+/** POST /api/thumbnail/:projectId — both phases in one call. */
+router.post("/:projectId", async (req, res, next) => {
+  try {
+    const project = requireProject(req.params.projectId);
+    const cached = await buildCandidates(project);
+    const thumbnail = await judgeCandidates(project, cached);
     res.json({ thumbnail });
   } catch (error) {
     next(error);

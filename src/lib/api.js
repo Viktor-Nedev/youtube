@@ -69,6 +69,9 @@ export const api = {
 
   generateMetadata: (projectId) => post(`/metadata/${projectId}`),
   generateThumbnail: (projectId) => post(`/thumbnail/${projectId}`),
+  // Two-phase: local frame scoring first so the grid renders before the AI runs.
+  thumbnailFrames: (projectId) => post(`/thumbnail/${projectId}/frames`),
+  thumbnailJudge: (projectId) => post(`/thumbnail/${projectId}/judge`),
   renderThumbnail: (projectId, options) => post(`/thumbnail/${projectId}/render`, options),
   generateClips: (projectId, options) => post(`/clips/${projectId}`, options),
   moderateComments: (video, limit) => post("/comments/moderate", { video, limit })

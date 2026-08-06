@@ -44,9 +44,14 @@ export function AppProvider({ children }) {
           /* storage unavailable (private mode) */
         }
 
+        // Prefer the remembered project; otherwise fall back to the most recent
+        // upload, so opening the app in a fresh browser doesn't show every
+        // module as empty while finished work sits on the server.
+        const target = savedId && list.some((p) => p.id === savedId) ? savedId : list[0]?.id;
+
         // The list payload is a summary, so re-fetch the full project.
-        if (savedId && list.some((p) => p.id === savedId)) {
-          const full = await api.getProject(savedId).catch(() => null);
+        if (target) {
+          const full = await api.getProject(target).catch(() => null);
           if (full?.project) setProject(full.project);
         }
       })
