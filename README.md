@@ -33,8 +33,8 @@ Upload one video, and six modules share both that video's transcript and the cha
 | **Ingest & Transcript** | Extracts audio with ffmpeg, transcribes it with Gemini into timestamped segments. Every other module reads from this — you never process the same video twice. |
 | **Channel Fingerprint** | Fetches a channel's recent uploads, has Gemini label each title's structure, then **computes lift arithmetically in code**. Produces the profile that conditions everything else. |
 | **Metadata** | 5 titles (each with a rationale tied to a fingerprint pattern), description, 15–20 tags, chapters snapped to real topic changes, and a pinned comment. |
-| **Thumbnail** | Samples frames, scores each locally, sends only the best 8 to Gemini vision, then renders a finished 1280×720 PNG with a composited text overlay. |
-| **Shorts** | Finds self-contained moments in the transcript and cuts **real 9:16 vertical MP4s with burned-in captions**. |
+| **Thumbnail** | Samples frames, scores each locally, sends only the best 8 to Gemini vision, then renders a finished 1280×720 PNG with a composited text overlay. Runs in two phases so the scored candidate grid appears in ~13s, while the vision call is still in flight. |
+| **Shorts** | Finds self-contained moments in the transcript and cuts **real 9:16 vertical MP4s with burned-in captions**. Framing is selectable: *crop* centre-fills for a talking head, *fit* preserves the whole frame over a blurred backdrop for screen recordings. |
 | **Analytics** | Every upload plotted against the channel's own median, with underperformers diagnosed and given rewritten titles. |
 | **Comments** | Sorts a comment section into spam / toxic / questions / praise / criticism and drafts replies for the ones worth your time. |
 
@@ -50,6 +50,10 @@ An LLM asked to calculate "2.3× lift" will produce a confident, plausible, **wr
 - **`services/fingerprint.js`** does arithmetic — every median, ratio and lift is computed in JavaScript from the statistics the YouTube API returned.
 
 Lift is only reported when at least 3 videos sit on each side of the split, and videos newer than 14 days are excluded from pattern analysis because they haven't accumulated their views yet. Every number in the UI is reproducible from the raw data.
+
+Verified rather than asserted: recomputing every lift figure independently from the returned view counts reproduces the displayed values exactly.
+
+One honest caveat — the *labelling* is not deterministic. Re-analysing the same channel can move a borderline feature's lift, because the model re-reads each title and marginal judgements shift. The arithmetic is exact for whatever labels a run produced; the labels themselves carry model variance. Fingerprints are cached on disk, so a given profile stays stable until you explicitly refresh it.
 
 ### 2. Staying inside the YouTube API's terms
 
