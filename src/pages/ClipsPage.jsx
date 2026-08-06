@@ -22,6 +22,7 @@ export default function ClipsPage() {
   const [error, setError] = useState(null);
   const [vertical, setVertical] = useState(true);
   const [withCaptions, setWithCaptions] = useState(true);
+  const [fit, setFit] = useState("crop");
 
   const clips = project?.clips;
 
@@ -29,7 +30,7 @@ export default function ClipsPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.generateClips(project.id, { vertical, withCaptions });
+      const result = await api.generateClips(project.id, { vertical, withCaptions, fit });
       patchProject({ clips: result });
     } catch (err) {
       setError(err.message);
@@ -64,7 +65,7 @@ export default function ClipsPage() {
         Shorts
       </PageTitle>
 
-      <Card className="flex flex-wrap gap-6 p-4">
+      <Card className="flex flex-wrap items-center gap-6 p-4">
         <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-300">
           <input
             type="checkbox"
@@ -83,7 +84,35 @@ export default function ClipsPage() {
           />
           Burn in captions
         </label>
+
+        {vertical ? (
+          <div className="flex items-center gap-2 text-sm text-ink-300">
+            <span className="text-ink-500">Framing</span>
+            <div className="flex overflow-hidden rounded-lg border border-ink-700">
+              {[
+                { value: "crop", label: "Crop", hint: "Fills the frame — best when a person is centred" },
+                { value: "pad", label: "Fit", hint: "Keeps the whole frame over a blurred backdrop — best for screen recordings" }
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  title={option.hint}
+                  onClick={() => setFit(option.value)}
+                  className={`px-3 py-1.5 text-sm transition ${
+                    fit === option.value ? "bg-ink-700 text-ink-100" : "text-ink-400 hover:bg-ink-850"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </Card>
+      <p className="-mt-4 text-xs text-ink-500">
+        {fit === "crop"
+          ? "Crop centre-fills the frame. Ideal for a talking head; it slices the sides off a screen recording."
+          : "Fit keeps the entire frame visible over a blurred backdrop — use it for screen recordings and slides."}
+      </p>
 
       {loading ? (
         <RunningNote label="Finding highlight moments, then encoding each clip with ffmpeg — this takes a moment…" />

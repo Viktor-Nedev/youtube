@@ -138,19 +138,47 @@ export async function extractFrameAt(inputPath, timeSec, outputPath) {
  * @param {string} options.output
  * @param {number} options.startSec
  * @param {number} options.endSec
- * @param {boolean} [options.vertical]  Reframe to 1080x1920
+ * @param {boolean} [options.vertical]     Reframe to 1080x1920
+ * @param {"crop"|"pad"} [options.fit]     How to reach 9:16 — see below
  * @param {Array<{file: string, startSec: number, endSec: number}>} [options.overlays]
  */
-export async function cutClip({ input, output, startSec, endSec, vertical = true, overlays = [] }) {
+export async function cutClip({
+  input,
+  output,
+  startSec,
+  endSec,
+  vertical = true,
+  fit = "crop",
+  overlays = []
+}) {
   await ensureDir(path.dirname(output));
   const duration = Math.max(0.5, endSec - startSec);
 
   const args = ["-y", "-ss", String(startSec), "-t", String(duration), "-i", input];
   for (const overlay of overlays) args.push("-i", overlay.file);
 
-  // Centre-crop to 9:16, then normalise to 1080x1920.
+  /**
+   * Two ways to reach 9:16:
+   *
+   * "crop" centre-crops and fills the frame — right for a person on camera,
+   * who sits in the middle third anyway.
+   *
+   * "pad" fits the whole frame over a blurred, zoomed copy of itself. Blind
+   * centre-cropping a 1920-wide screen recording keeps only ~600px of the
+   * middle, which slices a webpage or slide into something unreadable; padding
+   * keeps all the content and fills the empty thirds instead of black bars.
+   */
+  const VERTICAL_CROP = "crop='min(iw,ih*9/16)':'min(ih,iw*16/9)',scale=1080:1920:flags=lanczos,setsar=1";
+  const VERTICAL_PAD =
+    "split=2[bg][fg];" +
+    "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=28,eq=brightness=-0.12[blurred];" +
+    "[fg]scale=1080:1920:force_original_aspect_ratio=decrease[fitted];" +
+    "[blurred][fitted]overlay=(W-w)/2:(H-h)/2,setsar=1";
+
   const baseFilter = vertical
-    ? "crop='min(iw,ih*9/16)':'min(ih,iw*16/9)',scale=1080:1920:flags=lanczos,setsar=1"
+    ? fit === "pad"
+      ? VERTICAL_PAD
+      : VERTICAL_CROP
     : "scale=1280:-2:flags=lanczos,setsar=1";
 
   const steps = [`[0:v]${baseFilter}[base]`];

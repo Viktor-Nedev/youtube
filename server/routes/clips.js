@@ -44,7 +44,7 @@ router.post("/:projectId", async (req, res, next) => {
       throw Object.assign(new Error("This project has no transcript yet."), { status: 400 });
     }
 
-    const { withCaptions = true, vertical = true } = req.body ?? {};
+    const { withCaptions = true, vertical = true, fit = "crop" } = req.body ?? {};
     const started = Date.now();
     const duration = project.media.durationSec;
 
@@ -107,7 +107,15 @@ These cut real video, so an invented timestamp produces a broken clip.`;
       }
 
       const outputPath = path.join(dir, "clips", `clip-${index + 1}.mp4`);
-      await cutClip({ input: project.videoPath, output: outputPath, startSec: start, endSec: end, vertical, overlays });
+      await cutClip({
+        input: project.videoPath,
+        output: outputPath,
+        startSec: start,
+        endSec: end,
+        vertical,
+        fit,
+        overlays
+      });
 
       clips.push({
         index: index + 1,
@@ -135,6 +143,7 @@ These cut real video, so an invented timestamp produces a broken clip.`;
     const payload = {
       clips,
       vertical,
+      fit,
       withCaptions,
       usedFingerprint: Boolean(fingerprint),
       sourceDurationSec: duration,

@@ -96,17 +96,23 @@ function buildTextSvg(text, position = "left", accent = "#FFE01A") {
 
   return Buffer.from(`<svg width="${THUMB_WIDTH}" height="${THUMB_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
   <defs>
+    <!-- Held near-opaque across most of the text column and only released at the
+         far edge. The previous ramp faded out too early, so on a bright,
+         text-dense frame (a screen recording, a slide) the overlay landed on top
+         of the source's own text and both became unreadable. -->
     <linearGradient id="fadeL" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#000" stop-opacity="0.78"/>
+      <stop offset="0%" stop-color="#000" stop-opacity="0.92"/>
+      <stop offset="55%" stop-color="#000" stop-opacity="0.78"/>
       <stop offset="100%" stop-color="#000" stop-opacity="0"/>
     </linearGradient>
     <linearGradient id="fadeR" x1="1" y1="0" x2="0" y2="0">
-      <stop offset="0%" stop-color="#000" stop-opacity="0.78"/>
+      <stop offset="0%" stop-color="#000" stop-opacity="0.92"/>
+      <stop offset="55%" stop-color="#000" stop-opacity="0.78"/>
       <stop offset="100%" stop-color="#000" stop-opacity="0"/>
     </linearGradient>
     <radialGradient id="vign" cx="0.5" cy="0.5" r="0.75">
-      <stop offset="40%" stop-color="#000" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="#000" stop-opacity="0.8"/>
+      <stop offset="30%" stop-color="#000" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.9"/>
     </radialGradient>
   </defs>
   ${scrim}

@@ -77,8 +77,12 @@ and colour contrast.
 
 Then pick the winner and write overlay text of at most 5 words. The text must add
 information the image alone doesn't convey — never just restate what is visible.
-Choose a text position that avoids covering the main subject, and an accent colour
-with strong contrast against that frame.`;
+
+Choose textPosition as the side of the winning frame that is emptiest. It must avoid
+covering the main subject AND any text already present in the frame — headlines,
+slides, captions, browser or app UI. Two competing sets of words in one thumbnail
+makes both unreadable, which matters especially for screen recordings and slides.
+Pick an accent colour with strong contrast against that region of that frame.`;
 
     const imageParts = [];
     for (const frame of finalists) imageParts.push(await imagePart(frame.file));
