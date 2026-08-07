@@ -6,7 +6,8 @@ import {
   BarChart3,
   MessageSquare,
   Scissors,
-  Upload
+  Upload,
+  CalendarDays
 } from "lucide-react";
 import { useApp } from "./context/AppContext.jsx";
 import Landing from "./pages/Landing.jsx";
@@ -17,6 +18,7 @@ import ThumbnailPage from "./pages/ThumbnailPage.jsx";
 import AnalyticsPage from "./pages/AnalyticsPage.jsx";
 import CommentsPage from "./pages/CommentsPage.jsx";
 import ClipsPage from "./pages/ClipsPage.jsx";
+import SchedulePage from "./pages/SchedulePage.jsx";
 
 const NAV = [
   { to: "/app", label: "Upload", icon: Upload, end: true },
@@ -25,7 +27,8 @@ const NAV = [
   { to: "/app/thumbnail", label: "Thumbnail", icon: ImageIcon },
   { to: "/app/clips", label: "Shorts", icon: Scissors },
   { to: "/app/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/app/comments", label: "Comments", icon: MessageSquare }
+  { to: "/app/comments", label: "Comments", icon: MessageSquare },
+  { to: "/app/schedule", label: "Schedule", icon: CalendarDays }
 ];
 
 function Shell({ children }) {
@@ -116,6 +119,7 @@ export default function App() {
         <Route path="/app/clips" element={<ClipsPage />} />
         <Route path="/app/analytics" element={<AnalyticsPage />} />
         <Route path="/app/comments" element={<CommentsPage />} />
+        <Route path="/app/schedule" element={<SchedulePage />} />
         <Route path="*" element={<Dashboard />} />
       </Routes>
     </Shell>

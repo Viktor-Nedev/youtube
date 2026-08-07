@@ -74,5 +74,12 @@ export const api = {
   thumbnailJudge: (projectId) => post(`/thumbnail/${projectId}/judge`),
   renderThumbnail: (projectId, options) => post(`/thumbnail/${projectId}/render`, options),
   generateClips: (projectId, options) => post(`/clips/${projectId}`, options),
-  moderateComments: (video, limit) => post("/comments/moderate", { video, limit })
+  moderateComments: (video, limit) => post("/comments/moderate", { video, limit }),
+
+  authStatus: () => get("/auth/status"),
+  disconnect: () => post("/auth/disconnect"),
+  publish: (payload) => post("/publish", payload),
+  schedule: () => get("/schedule"),
+  unschedule: (id) =>
+    fetch(`/api/schedule/${id}`, { method: "DELETE" }).then((r) => r.json())
 };

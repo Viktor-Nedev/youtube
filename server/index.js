@@ -9,6 +9,7 @@ import metadataRouter from "./routes/metadata.js";
 import thumbnailRouter from "./routes/thumbnail.js";
 import clipsRouter from "./routes/clips.js";
 import commentsRouter from "./routes/comments.js";
+import publishRouter from "./routes/publish.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 8787);
@@ -34,6 +35,8 @@ app.use("/api/metadata", metadataRouter);
 app.use("/api/thumbnail", thumbnailRouter);
 app.use("/api/clips", clipsRouter);
 app.use("/api/comments", commentsRouter);
+// Auth, upload and scheduling all live under /api at the top level.
+app.use("/api", publishRouter);
 
 // Central error handler: every route can just throw.
 app.use((err, req, res, next) => {

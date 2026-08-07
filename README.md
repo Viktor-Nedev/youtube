@@ -34,7 +34,8 @@ Upload one video, and six modules share both that video's transcript and the cha
 | **Channel Fingerprint** | Fetches a channel's recent uploads, has Gemini label each title's structure, then **computes lift arithmetically in code**. Produces the profile that conditions everything else. |
 | **Metadata** | 5 titles (each with a rationale tied to a fingerprint pattern), description, 15–20 tags, chapters snapped to real topic changes, and a pinned comment. |
 | **Thumbnail** | Samples frames, scores each locally, sends only the best 8 to Gemini vision, then renders a finished 1280×720 PNG with a composited text overlay. Runs in two phases so the scored candidate grid appears in ~13s, while the vision call is still in flight. |
-| **Shorts** | Finds self-contained moments in the transcript and cuts **real 9:16 vertical MP4s with burned-in captions**. Framing is selectable: *crop* centre-fills for a talking head, *fit* preserves the whole frame over a blurred backdrop for screen recordings. |
+| **Shorts** | A short-form editor, not just a cutter. Finds self-contained moments, cuts **real 9:16 vertical MP4s**, and burns in **word-by-word captions** in four styles (pop, karaoke highlight, accent box, typewriter) with selectable position, entry animation, colour and colour emoji. Adds slow zoom, punch-in and edge fades. Framing is chosen automatically from the footage. |
+| **Schedule** | Uploads finished videos and Shorts to your own channel, immediately or on a calendar slot. |
 | **Analytics** | Every upload plotted against the channel's own median, with underperformers diagnosed and given rewritten titles. |
 | **Comments** | Sorts a comment section into spam / toxic / questions / praise / criticism and drafts replies for the ones worth your time. |
 
@@ -81,6 +82,30 @@ Every AI call goes through one wrapper (`server/services/gemini.js`) and uses **
 
 **Data** — YouTube Data API v3, public endpoints only
 
+### Captions are ASS, and emoji are not
+
+Captions are generated as ASS subtitle files and burned in with libass, which the
+bundled ffmpeg supports along with freetype, harfbuzz and fribidi. At one word per cue
+a 30-second clip needs around a hundred cues — as image overlays that would be
+unworkable, while ASS gives timing, styling, positioning and animation natively.
+
+Word timing comes from a pass over each clip's own audio rather than the whole video,
+which is markedly more accurate, and falls back to character-weighted distribution so a
+poor response degrades instead of breaking rendering.
+
+Colour emoji are the exception. **libass renders emoji as monochrome glyphs** because it
+does not rasterise colour font layers — verified by rendering, not assumed — so emoji are
+composited separately as bundled Twemoji PNGs. The model may only choose from the 36
+shipped glyphs, so it can never name one that cannot be drawn.
+
+### Framing is detected, not configured
+
+Centre-cropping to 9:16 is right for a person on camera and destructive for a screen
+recording: it keeps roughly 600px of a 1920px-wide frame, slicing a slide or webpage into
+something unreadable. Rather than leave a toggle a creator has to know to flip, three
+frames are classified once and the sensible default is chosen — fit-to-frame for screen
+recordings, centre crop for centred camera footage. Manual override is still available.
+
 ### Notable non-choices
 
 - **`fluent-ffmpeg`** — archived May 2025 and broken with current ffmpeg. Binaries are invoked directly via `execFile`.
@@ -108,7 +133,13 @@ Open **http://localhost:5173**. The Express API runs on `:8787` and Vite proxies
 |---|---|---|
 | `GEMINI_API_KEY` | Yes — all AI modules | [aistudio.google.com/apikey](https://aistudio.google.com/apikey), free tier available |
 | `YOUTUBE_API_KEY` | For Fingerprint / Analytics / Comments | Google Cloud Console → enable **YouTube Data API v3** → Credentials → API key. No OAuth consent screen needed. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Only for uploading & scheduling | Google Cloud Console → Credentials → OAuth client ID → **Web application**, redirect URI `http://localhost:8787/api/auth/callback` |
 | `PORT` | No | Defaults to `8787` |
+
+Everything except the Schedule module is read-only and needs no login. Uploading writes to
+a channel, so it requires OAuth consent. `youtube.upload` is a sensitive scope: until an
+app is verified by Google it works only for accounts added as **test users** on the consent
+screen — which is all a creator needs for their own channel.
 
 The Upload and Thumbnail modules work with only `GEMINI_API_KEY`. The channel modules need `YOUTUBE_API_KEY` as well.
 
