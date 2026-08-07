@@ -177,8 +177,15 @@ export async function buildFingerprint(channelInput, { limit = 50 } = {}) {
 For "features", list every structural feature the title genuinely uses. Use ONLY these values:
 ${TITLE_FEATURES.join(", ")}
 
-For "topic", give a short 1-3 word subject label. Reuse the exact same label across videos
-about the same subject so the labels can be grouped.
+For "topic", give a short 1-3 word subject label.
+
+Use between 6 and 10 distinct topic labels across the entire list — no fewer, no more —
+and reuse each one verbatim for every video on that subject.
+
+These labels are grouped to measure performance per topic, so both extremes destroy the
+result: near-duplicates ("smartphones" vs "smartphone reviews") split one group in two,
+while over-broad buckets ("tech") collapse everything into a single meaningless row.
+Decide that set of topics for this channel first, then assign every video to one of them.
 
 Do not consider view counts — they are deliberately not shown to you. Label the titles only.
 
@@ -187,7 +194,9 @@ ${analysed.map((v) => `${v.id} :: ${v.title}`).join("\n")}`;
   const labelled = await generateJSON({
     input: labelInput,
     schema: LABEL_SCHEMA,
-    model: MODELS.flash,
+    // Pure classification over a fixed enum — the lite model handles this well
+    // and it was the slower half of a ~70s analysis on the flash model.
+    model: MODELS.lite,
     label: "fingerprint:labels"
   });
 

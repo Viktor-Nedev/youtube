@@ -53,7 +53,7 @@ router.post("/moderate", async (req, res, next) => {
     const videoId = parseVideoId(video);
     const started = Date.now();
 
-    const comments = await getComments(videoId, Math.min(Number(limit) || 50, 100));
+    const comments = await getComments(videoId, Math.min(Number(limit) || 100, 500));
     if (!comments.length) {
       return res.json({ videoId, comments: [], summary: "This video has no comments to moderate.", elapsedMs: 0 });
     }
@@ -61,12 +61,14 @@ router.post("/moderate", async (req, res, next) => {
     const fingerprint = await getActiveFingerprint();
     const channelContext = fingerprintToPromptContext(fingerprint);
 
-    const moderated = [];
-    let summary = "";
-
+    // Batches are independent, so they run concurrently. Sequentially, 500
+    // comments would be ten round trips stacked end to end.
+    const batches = [];
     for (let offset = 0; offset < comments.length; offset += BATCH_SIZE) {
-      const batch = comments.slice(offset, offset + BATCH_SIZE);
+      batches.push(comments.slice(offset, offset + BATCH_SIZE));
+    }
 
+    const classifyBatch = async (batch) => {
       const prompt = `You are triaging YouTube comments for a creator.
 
 ${channelContext ? `${channelContext}\n\nWrite suggested replies in this channel's voice.\n` : ""}
@@ -97,19 +99,25 @@ ${batch.map((c, i) => `${i + 1}. [${c.likes} likes] ${c.author}: ${c.text.slice(
       });
 
       const byIndex = new Map(result.results.map((r) => [r.index, r]));
-      batch.forEach((comment, index) => {
-        const verdict = byIndex.get(index + 1);
-        moderated.push({
-          ...comment,
-          category: verdict?.category ?? "other",
-          confidence: verdict?.confidence ?? 0,
-          priority: verdict?.priority ?? "low",
-          suggestedReply: verdict?.suggestedReply || null
-        });
-      });
+      return {
+        summary: result.summary,
+        comments: batch.map((comment, index) => {
+          const verdict = byIndex.get(index + 1);
+          return {
+            ...comment,
+            category: verdict?.category ?? "other",
+            confidence: verdict?.confidence ?? 0,
+            priority: verdict?.priority ?? "low",
+            suggestedReply: verdict?.suggestedReply || null
+          };
+        })
+      };
+    };
 
-      if (!summary) summary = result.summary;
-    }
+    const results = await Promise.all(batches.map(classifyBatch));
+    // Order is preserved by Promise.all, so comments stay in relevance order.
+    const moderated = results.flatMap((r) => r.comments);
+    const summary = results[0]?.summary ?? "";
 
     const counts = CATEGORIES.reduce((acc, category) => {
       acc[category] = moderated.filter((c) => c.category === category).length;

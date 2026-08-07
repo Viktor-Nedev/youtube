@@ -196,28 +196,43 @@ export async function getVideos(videoIds) {
   return results;
 }
 
-/** Top-level comments for a video. 1 unit per page of up to 100. */
+/**
+ * Top-level comments for a video, paginated. 1 quota unit per page of up to 100,
+ * so even 500 comments costs 5 units against the 10,000/day budget.
+ */
 export async function getComments(videoId, limit = 50) {
-  const data = await call("commentThreads", {
-    part: "snippet",
-    videoId,
-    maxResults: Math.min(100, limit),
-    order: "relevance",
-    textFormat: "plainText"
-  });
+  const comments = [];
+  let pageToken;
 
-  return data.items.map((item) => {
-    const comment = item.snippet.topLevelComment.snippet;
-    return {
-      id: item.id,
-      author: comment.authorDisplayName,
-      authorImage: comment.authorProfileImageUrl,
-      text: comment.textDisplay,
-      likes: Number(comment.likeCount || 0),
-      publishedAt: comment.publishedAt,
-      replyCount: Number(item.snippet.totalReplyCount || 0)
-    };
-  });
+  while (comments.length < limit) {
+    const data = await call("commentThreads", {
+      part: "snippet",
+      videoId,
+      maxResults: Math.min(100, limit - comments.length),
+      order: "relevance",
+      textFormat: "plainText",
+      pageToken
+    });
+
+    for (const item of data.items) {
+      const comment = item.snippet.topLevelComment.snippet;
+      comments.push({
+        id: item.id,
+        author: comment.authorDisplayName,
+        authorImage: comment.authorProfileImageUrl,
+        text: comment.textDisplay,
+        likes: Number(comment.likeCount || 0),
+        publishedAt: comment.publishedAt,
+        replyCount: Number(item.snippet.totalReplyCount || 0)
+      });
+    }
+
+    pageToken = data.nextPageToken;
+    // Ran out of comments before reaching the requested limit.
+    if (!pageToken || !data.items.length) break;
+  }
+
+  return comments.slice(0, limit);
 }
 
 /** Extracts a video id from a watch URL, youtu.be link, or bare id. */

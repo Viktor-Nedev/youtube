@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { decodeFilename } from "./utils/filename.js";
 
 /**
  * Session state for the app.
@@ -67,6 +68,16 @@ function loadProjectsFromDisk() {
       const project = JSON.parse(raw);
       // Drop entries whose media has been deleted underneath us.
       if (project.videoPath && !fs.existsSync(project.videoPath)) continue;
+
+      // Self-heal names stored before the upload decoding was fixed. The repair
+      // is idempotent, so running it on every boot is safe.
+      const healed = decodeFilename(project.originalName);
+      if (healed !== project.originalName) {
+        project.originalName = healed;
+        fs.writeFileSync(manifestPath(dir.name), JSON.stringify(project, null, 2), "utf8");
+        console.log(`[store] repaired filename encoding for ${project.id}`);
+      }
+
       projects.set(project.id, project);
     } catch {
       /* no manifest (or corrupt) — skip this directory */

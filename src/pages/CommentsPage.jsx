@@ -32,13 +32,14 @@ export default function CommentsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState("all");
+  const [limit, setLimit] = useState(200);
 
   const moderate = async () => {
     if (!video.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      setResult(await api.moderateComments(video.trim(), 50));
+      setResult(await api.moderateComments(video.trim(), limit));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -68,12 +69,24 @@ export default function CommentsPage() {
             placeholder="https://www.youtube.com/watch?v=…"
             className="min-w-64 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-4 py-2.5 text-sm text-ink-200 placeholder:text-ink-500 focus:border-accent focus:outline-none"
           />
+          <select
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-ink-200 focus:border-accent focus:outline-none"
+          >
+            {[50, 100, 200, 350, 500].map((n) => (
+              <option key={n} value={n}>
+                {n} comments
+              </option>
+            ))}
+          </select>
           <Button onClick={moderate} disabled={loading || !video.trim()}>
             {loading ? "Triaging…" : "Triage comments"}
           </Button>
         </div>
         <p className="mt-2 text-xs text-ink-500">
-          Works on any public video — 1 YouTube API unit, plus one batched Gemini call.
+          Works on any public video. Costs 1 YouTube API unit per 100 comments; classification
+          runs in parallel batches of 50, so 250 comments take about 13 seconds.
         </p>
       </Card>
 

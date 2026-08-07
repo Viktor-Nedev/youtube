@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { probe, extractAudio } from "../services/ffmpeg.js";
 import { generateJSON, audioPart, MODELS } from "../services/gemini.js";
 import { normalizeSegments, toTimestamp } from "../utils/time.js";
+import { filenameFromUpload } from "../utils/filename.js";
 import {
   newProjectId,
   projectDir,
@@ -30,26 +31,6 @@ const storage = multer.diskStorage({
     cb(null, `source${ext.toLowerCase()}`);
   }
 });
-
-/**
- * Recovers the real filename from multer's `originalname`.
- *
- * multipart headers carry no encoding declaration, so multer decodes the
- * filename as latin1 per the spec. Browsers send UTF-8, which means anything
- * non-ASCII arrives mangled — a Cyrillic name like "Неозаглавен дизайн.mp4"
- * surfaces as "ÐÐµÐ¾Ð·Ð°Ð³Ð»Ð°Ð²ÐµÐ½ Ð´Ð¸Ð·Ð°Ð¹Ð½.mp4". Re-decoding the same
- * bytes as UTF-8 restores it, and leaves pure-ASCII names untouched.
- */
-function decodeFilename(name) {
-  const raw = String(name ?? "");
-  try {
-    const decoded = Buffer.from(raw, "latin1").toString("utf8");
-    // A failed round-trip yields replacement characters; keep the original then.
-    return decoded.includes("�") ? raw : decoded;
-  } catch {
-    return raw;
-  }
-}
 
 const upload = multer({
   storage,
@@ -119,7 +100,7 @@ router.post("/", upload.single("video"), async (req, res, next) => {
     }
 
     const project = createProject(id, {
-      originalName: decodeFilename(req.file.originalname),
+      originalName: filenameFromUpload(req.file),
       videoPath,
       videoUrl: toPublicUrl(videoPath),
       media,
