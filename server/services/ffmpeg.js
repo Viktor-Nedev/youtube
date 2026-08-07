@@ -20,12 +20,13 @@ const ffprobePath = ffprobeStatic.path;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_BUFFER = 32 * 1024 * 1024;
 
-async function run(binary, args, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
+async function run(binary, args, { timeout = DEFAULT_TIMEOUT_MS, cwd } = {}) {
   try {
     const { stdout, stderr } = await execFileAsync(binary, args, {
       timeout,
       maxBuffer: MAX_BUFFER,
-      windowsHide: true
+      windowsHide: true,
+      cwd
     });
     return { stdout, stderr };
   } catch (error) {
@@ -38,6 +39,20 @@ async function run(binary, args, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
 export async function ensureDir(dir) {
   await fs.promises.mkdir(dir, { recursive: true });
   return dir;
+}
+
+/**
+ * Escapes a filename for use *inside* a filter argument (subtitles=, movie=…).
+ *
+ * Only ever given a bare filename, never a full path. Filter options are
+ * colon-separated and the value passes through two parsers — the filtergraph
+ * and then the filter itself — so a Windows drive letter needs `\\:` to
+ * survive both. Rather than rely on that, `cutClip` runs ffmpeg with its
+ * working directory set to the subtitle file's folder so no drive letter ever
+ * reaches the filter string.
+ */
+export function escapeFilterPath(filePath) {
+  return filePath.replace(/\\/g, "/").replace(/:/g, "\\\\:").replace(/'/g, "\\'");
 }
 
 /** Media metadata: duration in seconds, dimensions, whether an audio track exists. */
@@ -79,6 +94,27 @@ export async function extractAudio(inputPath, outputPath) {
     "-b:a", "48k",
     outputPath
   ]);
+  return outputPath;
+}
+
+/**
+ * Extracts just one span of audio, for per-clip word timing.
+ * Short audio gives markedly better word timestamps than asking a model to
+ * locate words inside a long recording.
+ */
+export async function extractAudioSegment(inputPath, startSec, endSec, outputPath) {
+  await ensureDir(path.dirname(outputPath));
+  await run(ffmpegPath, [
+    "-y",
+    "-ss", String(startSec),
+    "-t", String(Math.max(0.5, endSec - startSec)),
+    "-i", inputPath,
+    "-vn",
+    "-ac", "1",
+    "-ar", "16000",
+    "-b:a", "48k",
+    outputPath
+  ], { timeout: 120_000 });
   return outputPath;
 }
 
@@ -126,21 +162,23 @@ export async function extractFrameAt(inputPath, timeSec, outputPath) {
 }
 
 /**
- * Cuts a segment, optionally reframed to 9:16 vertical for Shorts and optionally
- * with pre-rendered caption PNGs burned in.
+ * Cuts a segment, reframed to 9:16 for Shorts, with burned-in ASS captions,
+ * colour-emoji overlays and optional motion effects.
  *
- * Caption overlays are PNGs (rendered by sharp) rather than ffmpeg's drawtext:
- * drawtext needs a libfreetype-enabled build plus painful Windows font-path
- * escaping, and PNG overlays give us full typographic control for free.
+ * Captions are an ASS file rendered by libass rather than image overlays: at
+ * one word per cue a 30-second clip needs ~100 cues, which as PNG inputs would
+ * be unworkable, and ASS gives timing, styling and animation natively.
  *
  * @param {object} options
  * @param {string} options.input
  * @param {string} options.output
  * @param {number} options.startSec
  * @param {number} options.endSec
- * @param {boolean} [options.vertical]     Reframe to 1080x1920
- * @param {"crop"|"pad"} [options.fit]     How to reach 9:16 — see below
- * @param {Array<{file: string, startSec: number, endSec: number}>} [options.overlays]
+ * @param {boolean} [options.vertical]           Reframe to 1080x1920
+ * @param {"crop"|"pad"} [options.fit]           How to reach 9:16 — see below
+ * @param {string} [options.assFile]             Absolute path to a subtitle file
+ * @param {Array<{file:string,startSec:number,endSec:number,y:number}>} [options.overlays]
+ * @param {{zoom?:boolean,punchIn?:boolean,fadeEdges?:boolean}} [options.effects]
  */
 export async function cutClip({
   input,
@@ -149,7 +187,9 @@ export async function cutClip({
   endSec,
   vertical = true,
   fit = "crop",
-  overlays = []
+  assFile = null,
+  overlays = [],
+  effects = {}
 }) {
   await ensureDir(path.dirname(output));
   const duration = Math.max(0.5, endSec - startSec);
@@ -169,10 +209,15 @@ export async function cutClip({
    * keeps all the content and fills the empty thirds instead of black bars.
    */
   const VERTICAL_CROP = "crop='min(iw,ih*9/16)':'min(ih,iw*16/9)',scale=1080:1920:flags=lanczos,setsar=1";
+
+  // The backdrop is blurred at a quarter size and scaled back up. Blurring at
+  // full 1080x1920 was the single most expensive filter in the chain, and since
+  // the result is a heavy blur anyway the downscale is invisible.
   const VERTICAL_PAD =
     "split=2[bg][fg];" +
-    "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=28,eq=brightness=-0.12[blurred];" +
-    "[fg]scale=1080:1920:force_original_aspect_ratio=decrease[fitted];" +
+    "[bg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,gblur=sigma=8,eq=brightness=-0.12," +
+    "scale=1080:1920:flags=bilinear[blurred];" +
+    "[fg]scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos[fitted];" +
     "[blurred][fitted]overlay=(W-w)/2:(H-h)/2,setsar=1";
 
   const baseFilter = vertical
@@ -181,7 +226,35 @@ export async function cutClip({
       : VERTICAL_CROP
     : "scale=1280:-2:flags=lanczos,setsar=1";
 
-  const steps = [`[0:v]${baseFilter}[base]`];
+  /**
+   * Motion effects, applied before captions so the text stays rock-steady
+   * while the picture moves underneath it.
+   *
+   * zoompan is avoided deliberately — it re-times output to its own fps and
+   * desynchronises audio. A scale-then-crop pair driven by `t` gives the same
+   * slow push without touching the frame rate.
+   */
+  const motion = [];
+  if (effects.zoom) {
+    const scale = vertical ? "1080*(1+0.06*t/DUR)" : "1280*(1+0.06*t/DUR)";
+    motion.push(
+      `scale=w='${scale.replace(/DUR/g, duration.toFixed(2))}':h=-2:eval=frame`,
+      vertical ? "crop=1080:1920" : "crop=1280:ih"
+    );
+  }
+  if (effects.punchIn) {
+    // Brief tighter framing over the hook, then release.
+    const hold = Math.min(1.6, duration * 0.25).toFixed(2);
+    motion.push(
+      `scale=w='if(lt(t,${hold}),${vertical ? 1080 : 1280}*1.12,${vertical ? 1080 : 1280})':h=-2:eval=frame`,
+      vertical ? "crop=1080:1920" : "crop=1280:ih"
+    );
+  }
+  if (effects.fadeEdges) {
+    motion.push(`fade=t=in:st=0:d=0.35`, `fade=t=out:st=${Math.max(0, duration - 0.35).toFixed(2)}:d=0.35`);
+  }
+
+  const steps = [`[0:v]${baseFilter}${motion.length ? "," + motion.join(",") : ""}[base]`];
   let current = "base";
 
   overlays.forEach((overlay, index) => {
@@ -189,11 +262,20 @@ export async function cutClip({
     // Overlay timings are relative to the clip, not the source video.
     const from = Math.max(0, overlay.startSec - startSec);
     const to = Math.max(from, overlay.endSec - startSec);
+    const y = overlay.y ?? "H-h-160";
     steps.push(
-      `[${current}][${index + 1}:v]overlay=(W-w)/2:H-h-160:enable='between(t,${from.toFixed(2)},${to.toFixed(2)})'[${next}]`
+      `[${current}][${index + 1}:v]overlay=(W-w)/2:${y}:enable='between(t,${from.toFixed(2)},${to.toFixed(2)})'[${next}]`
     );
     current = next;
   });
+
+  // Captions last so nothing scales or crops the text. Referenced by bare
+  // filename with ffmpeg's cwd set below — see escapeFilterPath.
+  if (assFile) {
+    const next = "subbed";
+    steps.push(`[${current}]subtitles=${escapeFilterPath(path.basename(assFile))}[${next}]`);
+    current = next;
+  }
 
   args.push(
     "-filter_complex", steps.join(";"),
@@ -209,7 +291,9 @@ export async function cutClip({
     output
   );
 
-  await run(ffmpegPath, args);
+  // cwd is the subtitle's folder so the filter can reference it by bare name,
+  // which keeps the Windows drive letter out of the filter string entirely.
+  await run(ffmpegPath, args, { cwd: assFile ? path.dirname(assFile) : undefined });
   return output;
 }
 
