@@ -16,13 +16,43 @@ import {
   formatDuration
 } from "../components/ui.jsx";
 
+/** Labelled segmented control — the editor has enough options to need one. */
+function Segmented({ label, value, onChange, options }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="eyebrow text-ink-500">{label}</span>
+      <div className="flex overflow-hidden rounded-lg border border-ink-700">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            className={`px-3 py-1.5 text-sm transition ${
+              value === option.value ? "bg-ink-700 text-ink-100" : "text-ink-400 hover:bg-ink-850"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ClipsPage() {
   const { project, patchProject, hasTranscript } = useApp();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [vertical, setVertical] = useState(true);
   const [withCaptions, setWithCaptions] = useState(true);
-  const [fit, setFit] = useState("crop");
+  // undefined means "let the content detector decide"
+  const [fit, setFit] = useState(undefined);
+  const [subtitleStyle, setSubtitleStyle] = useState("pop");
+  const [subtitlePosition, setSubtitlePosition] = useState("bottom");
+  const [subtitleAnimation, setSubtitleAnimation] = useState("pop");
+  const [wordsPerCue, setWordsPerCue] = useState(1);
+  const [accent, setAccent] = useState("#FFE01A");
+  const [withEmoji, setWithEmoji] = useState(true);
+  const [effects, setEffects] = useState({ zoom: true, punchIn: false, fadeEdges: true });
 
   const clips = project?.clips;
 
@@ -30,7 +60,18 @@ export default function ClipsPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.generateClips(project.id, { vertical, withCaptions, fit });
+      const result = await api.generateClips(project.id, {
+        vertical,
+        withCaptions,
+        fit,
+        subtitleStyle,
+        subtitlePosition,
+        subtitleAnimation,
+        wordsPerCue,
+        accent,
+        withEmoji,
+        effects
+      });
       patchProject({ clips: result });
     } catch (err) {
       setError(err.message);
@@ -65,53 +106,137 @@ export default function ClipsPage() {
         Shorts
       </PageTitle>
 
-      <Card className="flex flex-wrap items-center gap-6 p-4">
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-300">
-          <input
-            type="checkbox"
-            checked={vertical}
-            onChange={(e) => setVertical(e.target.checked)}
-            className="accent-accent"
-          />
-          Reframe to 9:16 vertical
-        </label>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-300">
-          <input
-            type="checkbox"
-            checked={withCaptions}
-            onChange={(e) => setWithCaptions(e.target.checked)}
-            className="accent-accent"
-          />
-          Burn in captions
-        </label>
+      <Card className="space-y-5 p-5">
+        <div className="flex flex-wrap items-center gap-6">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-300">
+            <input
+              type="checkbox"
+              checked={vertical}
+              onChange={(e) => setVertical(e.target.checked)}
+              className="accent-accent"
+            />
+            9:16 vertical
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-300">
+            <input
+              type="checkbox"
+              checked={withCaptions}
+              onChange={(e) => setWithCaptions(e.target.checked)}
+              className="accent-accent"
+            />
+            Word-by-word captions
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-300">
+            <input
+              type="checkbox"
+              checked={withEmoji}
+              onChange={(e) => setWithEmoji(e.target.checked)}
+              className="accent-accent"
+            />
+            Emoji
+          </label>
 
-        {vertical ? (
-          <div className="flex items-center gap-2 text-sm text-ink-300">
-            <span className="text-ink-500">Framing</span>
-            <div className="flex overflow-hidden rounded-lg border border-ink-700">
-              {[
-                { value: "crop", label: "Crop", hint: "Fills the frame — best when a person is centred" },
-                { value: "pad", label: "Fit", hint: "Keeps the whole frame over a blurred backdrop — best for screen recordings" }
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  title={option.hint}
-                  onClick={() => setFit(option.value)}
-                  className={`px-3 py-1.5 text-sm transition ${
-                    fit === option.value ? "bg-ink-700 text-ink-100" : "text-ink-400 hover:bg-ink-850"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
+          {vertical ? (
+            <Segmented
+              label="Framing"
+              value={fit ?? "auto"}
+              onChange={(v) => setFit(v === "auto" ? undefined : v)}
+              options={[
+                { value: "auto", label: "Auto" },
+                { value: "crop", label: "Crop" },
+                { value: "pad", label: "Fit" }
+              ]}
+            />
+          ) : null}
+        </div>
+
+        {withCaptions ? (
+          <>
+            <div className="rule" />
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+              <Segmented
+                label="Style"
+                value={subtitleStyle}
+                onChange={setSubtitleStyle}
+                options={[
+                  { value: "pop", label: "Pop" },
+                  { value: "karaoke", label: "Karaoke" },
+                  { value: "box", label: "Box" },
+                  { value: "typewriter", label: "Typewriter" }
+                ]}
+              />
+              <Segmented
+                label="Position"
+                value={subtitlePosition}
+                onChange={setSubtitlePosition}
+                options={[
+                  { value: "top", label: "Top" },
+                  { value: "middle", label: "Middle" },
+                  { value: "bottom", label: "Bottom" }
+                ]}
+              />
+              <Segmented
+                label="Animation"
+                value={subtitleAnimation}
+                onChange={setSubtitleAnimation}
+                options={[
+                  { value: "pop", label: "Pop" },
+                  { value: "fade", label: "Fade" },
+                  { value: "slide", label: "Slide" },
+                  { value: "none", label: "None" }
+                ]}
+              />
+              {subtitleStyle === "pop" || subtitleStyle === "box" ? (
+                <Segmented
+                  label="Words"
+                  value={String(wordsPerCue)}
+                  onChange={(v) => setWordsPerCue(Number(v))}
+                  options={[
+                    { value: "1", label: "One" },
+                    { value: "2", label: "Two" }
+                  ]}
+                />
+              ) : null}
+              <div className="flex items-center gap-2">
+                <span className="eyebrow text-ink-500">Colour</span>
+                <input
+                  type="color"
+                  value={accent}
+                  onChange={(e) => setAccent(e.target.value)}
+                  className="h-8 w-12 cursor-pointer rounded-md border border-ink-700 bg-ink-900"
+                />
+              </div>
             </div>
-          </div>
+          </>
         ) : null}
+
+        <div className="rule" />
+        <div className="flex flex-wrap items-center gap-6">
+          <span className="eyebrow text-ink-500">Effects</span>
+          {[
+            { key: "zoom", label: "Slow zoom" },
+            { key: "punchIn", label: "Punch in on hook" },
+            { key: "fadeEdges", label: "Fade edges" }
+          ].map((effect) => (
+            <label key={effect.key} className="flex cursor-pointer items-center gap-2 text-sm text-ink-300">
+              <input
+                type="checkbox"
+                checked={effects[effect.key]}
+                onChange={(e) => setEffects({ ...effects, [effect.key]: e.target.checked })}
+                className="accent-accent"
+              />
+              {effect.label}
+            </label>
+          ))}
+        </div>
       </Card>
+
       <p className="-mt-4 text-xs text-ink-500">
-        {fit === "crop"
-          ? "Crop centre-fills the frame. Ideal for a talking head; it slices the sides off a screen recording."
-          : "Fit keeps the entire frame visible over a blurred backdrop — use it for screen recordings and slides."}
+        {fit === undefined
+          ? "Auto inspects the footage and fits screen recordings whole while cropping to a centred subject."
+          : fit === "crop"
+            ? "Crop centre-fills the frame. Right for a talking head; it slices the sides off a screen recording."
+            : "Fit keeps the entire frame visible over a blurred backdrop — for screen recordings and slides."}
       </p>
 
       {loading ? (
@@ -121,6 +246,20 @@ export default function ClipsPage() {
 
       {clips?.clips?.length ? (
         <div className="space-y-8 fade-up">
+          {clips.contentType ? (
+            <Card className="flex flex-wrap items-center gap-3 p-4">
+              <Badge tone="accent">
+                {clips.contentType.type === "screen"
+                  ? "Screen recording detected"
+                  : clips.contentType.type === "camera"
+                    ? "Camera footage detected"
+                    : "Mixed footage detected"}
+              </Badge>
+              <Badge>{clips.fit === "pad" ? "fit whole frame" : "centre crop"}</Badge>
+              <span className="text-sm text-ink-400">{clips.contentType.reason}</span>
+            </Card>
+          ) : null}
+
           <section>
             <SectionTitle hint={`${clips.clips.length} clips in ${(clips.elapsedMs / 1000).toFixed(1)}s`}>
               Where they came from
@@ -171,7 +310,12 @@ export default function ClipsPage() {
                     <Badge>
                       {clip.startLabel} → {clip.endLabel}
                     </Badge>
-                    {clip.captionCount ? <Badge>{clip.captionCount} captions</Badge> : null}
+                    {clip.wordCount ? (
+                      <Badge tone={clip.timingSource === "model" ? "good" : "neutral"}>
+                        {clip.wordCount} words · {clip.timingSource === "model" ? "timed" : "estimated"}
+                      </Badge>
+                    ) : null}
+                    {clip.emoji ? <Badge>{clip.emoji}</Badge> : null}
                   </div>
 
                   <div className="rounded-lg border border-ink-800 bg-ink-900 p-3">
