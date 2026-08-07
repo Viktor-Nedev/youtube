@@ -35,9 +35,33 @@ const VISION_SCHEMA = {
     overlayText: { type: "string", description: "Punchy overlay text, 5 words maximum" },
     textPosition: { type: "string", enum: ["left", "right", "center"] },
     accentColor: { type: "string", description: "Hex colour for the text, e.g. #FFE01A" },
-    winnerReason: { type: "string", description: "Why this frame wins over the others" }
+    winnerReason: { type: "string", description: "Why this frame wins over the others" },
+    alternates: {
+      type: "array",
+      description:
+        "Two further thumbnail directions that are genuinely different from the winner and from each other — a different frame, a different angle of text, or a different colour treatment",
+      items: {
+        type: "object",
+        properties: {
+          frameIndex: { type: "integer", description: "1-based index of the frame to use" },
+          overlayText: { type: "string", description: "Overlay text, 5 words maximum" },
+          textPosition: { type: "string", enum: ["left", "right", "center"] },
+          accentColor: { type: "string", description: "Hex colour" },
+          angle: { type: "string", description: "Short label for the hook, e.g. 'question', 'result-first'" }
+        },
+        required: ["frameIndex", "overlayText", "textPosition", "accentColor", "angle"]
+      }
+    }
   },
-  required: ["candidates", "winnerIndex", "overlayText", "textPosition", "accentColor", "winnerReason"]
+  required: [
+    "candidates",
+    "winnerIndex",
+    "overlayText",
+    "textPosition",
+    "accentColor",
+    "winnerReason",
+    "alternates"
+  ]
 };
 
 /**
@@ -117,7 +141,11 @@ Choose textPosition as the side of the winning frame that is emptiest. It must a
 covering the main subject AND any text already present in the frame — headlines,
 slides, captions, browser or app UI. Two competing sets of words in one thumbnail
 makes both unreadable, which matters especially for screen recordings and slides.
-Pick an accent colour with strong contrast against that region of that frame.`;
+Pick an accent colour with strong contrast against that region of that frame.
+
+Then give two alternates the creator can choose between. They must be genuinely
+different bets, not restatements of the winner — a different frame, a different hook
+angle, or a different colour treatment. Three near-identical options are useless.`;
 
   const imageParts = [];
   for (const frame of finalists) imageParts.push(await imagePart(frame.file));
@@ -151,6 +179,54 @@ Pick an accent colour with strong contrast against that region of that frame.`;
   const cleanPath = path.join(dir, "thumbs", "thumbnail-clean.png");
   await renderThumbnail({ frameFile: hiResPath, text: null, outputPath: cleanPath });
 
+  /**
+   * Alternates give the creator something to choose between. Each may sit on a
+   * different frame, so its source is pulled at full resolution too rather than
+   * reusing the winner's.
+   */
+  const variants = [
+    {
+      label: "Winner",
+      angle: vision.winnerReason,
+      overlayText: vision.overlayText,
+      textPosition: vision.textPosition,
+      accentColor: vision.accentColor,
+      timeSec: winner.timeSec,
+      url: toPublicUrl(finalPath),
+      isWinner: true
+    }
+  ];
+
+  for (const [index, alt] of (vision.alternates ?? []).entries()) {
+    try {
+      const altFrame = finalists[Math.min(Math.max(1, alt.frameIndex), finalists.length) - 1];
+      const altHiRes = path.join(dir, "thumbs", `alt-src-${altFrame.timeSec}.jpg`);
+      await extractFrameAt(project.videoPath, altFrame.timeSec, altHiRes);
+
+      const altPath = path.join(dir, "thumbs", `variant-${index + 1}.png`);
+      await renderThumbnail({
+        frameFile: altHiRes,
+        text: alt.overlayText,
+        outputPath: altPath,
+        position: alt.textPosition,
+        accent: alt.accentColor
+      });
+
+      variants.push({
+        label: alt.angle,
+        angle: alt.angle,
+        overlayText: alt.overlayText,
+        textPosition: alt.textPosition,
+        accentColor: alt.accentColor,
+        timeSec: altFrame.timeSec,
+        url: toPublicUrl(altPath),
+        isWinner: false
+      });
+    } catch (error) {
+      console.warn(`[thumbnail] variant ${index + 1} failed: ${error.message}`);
+    }
+  }
+
   const scoreByIndex = new Map(vision.candidates.map((c) => [c.index, c]));
   const candidates = [];
 
@@ -176,6 +252,7 @@ Pick an accent colour with strong contrast against that region of that frame.`;
 
   const thumbnail = {
     candidates,
+    variants,
     framesSampled: cached.framesSampled,
     finalistCount: finalists.length,
     overlayText: vision.overlayText,

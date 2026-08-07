@@ -12,7 +12,8 @@ import {
   ErrorNote,
   EmptyState,
   RunningNote,
-  Spinner
+  Spinner,
+  formatDuration
 } from "../components/ui.jsx";
 
 export default function ThumbnailPage() {
@@ -147,26 +148,56 @@ export default function ThumbnailPage() {
             <SectionTitle
               hint={`${thumbnail.framesSampled} frames sampled → ${thumbnail.finalistCount} finalists → 1 vision call`}
             >
-              Final thumbnail
+              {thumbnail.variants?.length > 1 ? "Pick a direction" : "Final thumbnail"}
             </SectionTitle>
-            <Card className="overflow-hidden">
-              <img src={thumbnail.thumbnailUrl} alt="Generated thumbnail" className="w-full" />
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-800 p-4">
-                <p className="max-w-xl text-sm text-ink-400">{thumbnail.winnerReason}</p>
-                <div className="flex gap-2">
-                  <a href={thumbnail.cleanUrl} download>
-                    <Button variant="ghost" size="sm">
-                      Clean version
-                    </Button>
-                  </a>
-                  <a href={thumbnail.thumbnailUrl} download>
-                    <Button size="sm">
-                      <Download className="h-3.5 w-3.5" />
-                      Download PNG
-                    </Button>
-                  </a>
-                </div>
+
+            {thumbnail.variants?.length > 1 ? (
+              <div className="grid gap-5 lg:grid-cols-3">
+                {thumbnail.variants.map((variant, index) => (
+                  <Card
+                    key={index}
+                    className={`overflow-hidden ${variant.isWinner ? "border-accent" : ""}`}
+                    raised={variant.isWinner}
+                  >
+                    <div className="relative">
+                      <img src={variant.url} alt={variant.overlayText} className="w-full" />
+                      {variant.isWinner ? (
+                        <span className="absolute left-2 top-2 rounded-md bg-accent px-2 py-0.5 text-xs font-medium text-white">
+                          AI pick
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="space-y-2.5 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge tone={variant.isWinner ? "accent" : "neutral"}>
+                          {variant.isWinner ? "winner" : variant.angle}
+                        </Badge>
+                        <span className="tabular text-xs text-ink-500">{formatDuration(variant.timeSec)}</span>
+                      </div>
+                      <p className="text-sm text-ink-300">"{variant.overlayText}"</p>
+                      <a href={variant.url} download className="block">
+                        <Button variant={variant.isWinner ? "primary" : "ghost"} size="sm" className="w-full">
+                          <Download className="h-3.5 w-3.5" />
+                          Download
+                        </Button>
+                      </a>
+                    </div>
+                  </Card>
+                ))}
               </div>
+            ) : (
+              <Card className="overflow-hidden">
+                <img src={thumbnail.thumbnailUrl} alt="Generated thumbnail" className="w-full" />
+              </Card>
+            )}
+
+            <Card className="mt-4 flex flex-wrap items-center justify-between gap-3 p-4">
+              <p className="max-w-xl text-sm text-ink-400">{thumbnail.winnerReason}</p>
+              <a href={thumbnail.cleanUrl} download>
+                <Button variant="ghost" size="sm">
+                  Clean version, no text
+                </Button>
+              </a>
             </Card>
           </section>
 
